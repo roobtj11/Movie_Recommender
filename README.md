@@ -4,7 +4,7 @@ This program was made for my Topics of Applied Computing class where I worked to
 
 ***TO DO A FULL RUN OF THE CODE YOUR FIRST INPUT NEEDS TO BE '10'***
 
-***BEFORE running you must download the following zip and unpack its contents into the same folder that runs the code***
+***BEFORE running you must download the following zip and unpack its contents into the same folder that runs the code 'They were too large to include in the github'***
 https://drive.google.com/file/d/1htPgX5m9bXW-spmHthC4CgNQ8DCflidY/view?usp=sharing
 
 you must include
