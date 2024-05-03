@@ -6,7 +6,6 @@ from functools import total_ordering
 import glob
 from multiprocessing import Value
 import os
-
 from numpy.random import f, rand; os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' # This prevents TensorFlow from generating warnings in the console
 from recommender_thread import recommender_thread
 import numpy as np
@@ -28,7 +27,7 @@ t_order = 0
 
 def main():
     global ratings
-    o = input("(1) generate Rankings. (2) Train Model based on ratings (3) Combine Rating files (4) Predict (5) gen avgs (6) Import avg into ratings (7) remove movies (8) run from loading ratings: ")
+    o = input("What would you like to do? Enter the number inbetween the ()'s: (10) Full Run Through. The rest of these options were for development and testing: (1) generate Rankings. (2) Train Model based on ratings (3) Combine Rating files (4) Predict (5) gen avgs (6) Import avg into ratings (7) remove movies (8) run from loading ratings: ")
     match int(o):
         case 1:#gets all ratings from the ratings.csv and turns a given range into a np.array
             get_data_from_csv()
@@ -78,7 +77,7 @@ def main():
             #Train model
             train_model()
             predict()
-        case 9:
+        case 9:         
             print("import Ratings with only needed movies")
             load_ratings()
             normal_dist_into_ratings()
@@ -87,33 +86,57 @@ def main():
             predict()
         case 10:
             print("Initiating Full Run")
-            get_data_from_csv()
-            remove_unused_movies()
-            print("Where do you want to save the new ratings?")
-            path = get_npy_path()
-            save(path,ratings)
-            avgs, std = get_avg_for_each_movie()
+            raw_ratings_path, starting_user, ending_user = get_data_from_csv()
+            
+            # #############temp####
+            # raw_ratings_path = 'raw_ratings-S1-E15001.npy'
+            # starting_user = 1
+            # ending_user=15001
+            # ############TEMP#################
+
+
+
+            raw_deleted_path = remove_unused_movies(raw_ratings_path, starting_user, ending_user)
+            #raw_deleted_path = 'reduced_movie_ratings_1-15001.npy'
+            
+            avgs, std = get_avg_for_each_movie(raw_deleted_path)
             #save Averages
-            print("Where do you want to save a copy of the Average's Calculations?"); path = get_npy_path();save(path,avgs);print(f"Saved Average Calculations to {path}");#print(avgs)
+            print("Where do you want to save a copy of the Average's Calculations?"); avg_path = f'{starting_user}_{ending_user}_avg_calculation.npy';save(avg_path,avgs);print(f"Saved Average Calculations to {avg_path}");#print(avgs)
             #save Standard Deviation
-            print("Where do you want to save a copy of the Standard Deviation Calculations?"); path = get_npy_path(); save(path,std); print(f"Saved Standard Deviations to Calculations to {path}"); #print(std)
+            print("Where do you want to save a copy of the Standard Deviation Calculations?"); std_path = f'{starting_user}_{ending_user}_STD_calculation.npy'; save(std_path,std); print(f"Saved Standard Deviations to Calculations to {std_path}"); #print(std)
 
             #0's
             print("import Ratings with only needed movies")
-            load_ratings()
-            train_model()
-            predict()
+            ratings = np.load(raw_deleted_path)
+            zeros_model_path = train_model('Zeros',starting_user,ending_user)
+            #zeros_model_path = '+_Zeros+_1-15001.keras'     ####################################################################TEMP
+            zeros_pred, user_path = predict(zeros_model_path,0,'user3',NULL,False)
+            #user_path='user+user2+input.npy'        ###############################################TMP
+            #zeros_pred,user_path = predict(zeros_model_path,1,NULL,user_path,False)
+            
             #AVG
             print("import Ratings with only needed movies")
-            load_ratings()
+            ratings = np.load(raw_deleted_path)
+            avg_imported_path=import_avg_into_ratings(avg_path,std_path,starting_user,ending_user)
+            print("Where do you want to save the New Ratings filled with Average Calculations?"); path = f'{starting_user}-{ending_user}_Filled_Avg.npy';save(path,ratings)
+            avg_model_path = train_model('AVG',starting_user,ending_user)
+            avg_pred,user_path = predict(avg_model_path,1,NULL,user_path,False)
             
             #normal Dist
             print("import Ratings with only needed movies")
-            load_ratings()
-            normal_dist_into_ratings()
-            print("Where do you want to save the New Ratings filled with Normal distribution Calculations?"); path = get_npy_path();save(path,ratings)
-            train_model()
-            predict()
+            ratings = np.load(raw_deleted_path)
+            normal_dist_into_ratings(avg_path,std_path)
+            path = f'{starting_user}-{ending_user}_Filled_Avg.npy';save(path,ratings)
+            print(f"Save the New Ratings filled with Normal distribution Calculations to {path}");
+            norm_model_path = train_model('Norm',starting_user,ending_user)
+            norm_pred,user_path = predict(norm_model_path,1,NULL,user_path,False)
+            
+            print("Zeros")
+            printOutput(zeros_pred)
+            print("AVG")
+            printOutput(avg_pred)
+            print("Normal Distributon")
+            printOutput(norm_pred)
               
             
 def load_ratings():
@@ -128,21 +151,20 @@ def save_ratings():
     save(path,ratings)
     return path    
         
-def remove_unused_movies():
+def remove_unused_movies(raw_ratings_path=NULL,starting=NULL,ending=NULL):
     global ratings
     
     # Read the movie IDs from the CSV file
-    print("Please provide movies.csv")
-    with open(get_csv_path(), newline='') as csvfile:
+    with open('movies_id_only.csv', newline='') as csvfile:
         csvFile = list(csv.reader(csvfile))
         # Extract movie IDs (assuming movie IDs are in the first column)
         movie_ids = [int(row[0]) for row in csvFile[1:]]  # Skip the header row
         
     # Load the ratings file
-    print("Please provide raw ratings file:")
-    path = get_npy_path()
-    ratings = np.load(path)
-    print(f"Saved to {path}")
+    if raw_ratings_path is NULL:
+        print("Please provide raw ratings file:")
+        raw_ratings_path = get_npy_path()
+    ratings = np.load(raw_ratings_path)
     
     # Initialize a list to store the indices of columns to delete
     cols_to_delete = []
@@ -150,10 +172,13 @@ def remove_unused_movies():
         movie_id = i + 1  # Assuming movie IDs start from 1
         if movie_id not in movie_ids:
             cols_to_delete.append(i)
-    #print(cols_to_delete)
     
     # Delete columns from the ratings array
-    ratings = np.delete(ratings, cols_to_delete, axis=1)   
+    ratings = np.delete(ratings, cols_to_delete, axis=1)
+    path = f'reduced_movie_ratings_{starting}-{ending}.npy'
+    save(path,ratings)
+    print(f"Saved {path}")
+    return path
     
 def get_data_from_csv():
     print("Beginning to Get Data from CSVs")
@@ -200,14 +225,15 @@ def get_data_from_csv():
     t_order=0
     ratings=ratings[1:]
     save(f'raw_ratings-S{starting_user}-E{ending_user}.npy',ratings)
+    return f"raw_ratings-S{starting_user}-E{ending_user}.npy", starting_user, ending_user
 
 def get_avg_for_each_movie(ratings_path=NULL):
     print("Beginning to calculate Average rating for each Movie...")
     global ratings
     if ratings_path is NULL:
         print("Please provide ratings file:")
-        path = get_npy_path()
-        ratings = np.load(path)
+        ratings_path = get_npy_path()
+    ratings = np.load(ratings_path)
     
     ratings_by_movie=ratings.transpose()
     movie_rating_avg = np.zeros(len(ratings[0]))
@@ -246,13 +272,15 @@ def get_avg_for_each_movie(ratings_path=NULL):
         t.join()
     return movie_rating_avg, movie_rating_standard_dev
 
-def import_avg_into_ratings(avg_path = NULL, std_path=NULL):
+def import_avg_into_ratings(avg_path = NULL, std_path=NULL,starting=NULL,ending=NULL):
     global ratings
     print("Taking Average ratings and importing them into ratings to fill 0's")
     if avg_path is NULL:
-        print("import Path to AVG's File: "); path = get_npy_path(); avgs = np.load(path); print(f"Avg's Shape: {avgs.shape}. Ratings Shape: {ratings.shape}")
+        print("import Path to AVG's File: "); avg_path = get_npy_path(); 
+    avgs = np.load(avg_path); print(f"Avg's Shape: {avgs.shape}. Ratings Shape: {ratings.shape}")
     if std_path is NULL:
-        print("import Path to STD's File: "); path = get_npy_path(); STDs = np.load(path); print(f"STD's Shape: {STDs.shape}. Ratings Shape: {ratings.shape}")
+        print("import Path to STD's File: "); std_path = get_npy_path(); 
+    STDs = np.load(std_path); print(f"STD's Shape: {STDs.shape}. Ratings Shape: {ratings.shape}")
     
     def update_user_ratings(start, end,thread):
         global ratings
@@ -280,6 +308,11 @@ def import_avg_into_ratings(avg_path = NULL, std_path=NULL):
         t.join()
 
     print(ratings.shape)
+    if starting or ending is NULL:
+        return
+    else:
+        path= f'Avg_inserted_into_{starting}-{ending}.npy';save(path,ratings)
+        return path
 
 def normal_dist_into_ratings(avg_path = NULL, std_path=NULL):
     global ratings
@@ -342,7 +375,13 @@ def get_ratings(section,mutex,thread_name):
                 #needs to go to before u_current_user>500
                 #semaphores for rankings?
                 #print(f"Thread: {thread_name} Writing for {u_current_user}!")
-                tmp_ratings = np.vstack([tmp_ratings, u_current_array])
+                p=False
+                while p == False:
+                    try:
+                        tmp_ratings = np.vstack([tmp_ratings, u_current_array])
+                        p=True
+                    except:
+                        print("out of memory")
                 u_current_array = np.zeros(209171)
                 u_current_user = u_current_user + 1
     tmp_ratings=tmp_ratings[1:]
@@ -378,54 +417,52 @@ def get_start_and_end(s):
     print(f"end: {end}")
     return [start,end]
 
-def train_model():
+def train_model(model_type=NULL,starting=NULL,ending=NULL):
     print("Training Model")
     global ratings
     num_users, num_movies = ratings.shape
-    print(ratings.shape)
     print(f"Prediction based off of {num_users} users ratings on {num_movies} movies")
-    
     input_layer = Input(shape=(num_movies,))
     hidden_layer = Dense(64, activation='relu')(input_layer)
     output_layer = Dense(num_movies, activation='linear', kernel_constraint=MinMaxNorm(min_value=0.5, max_value=5))(hidden_layer)
     model = Model(inputs=input_layer, outputs=output_layer)
     model.compile(optimizer='adam', loss='mse')  # Using mean squared error as loss
-    
-    # Pass the mask along with ratings during training
-    #mask = mask.reshape(-1, num_movies)
-    model.fit(ratings, ratings, epochs=30, batch_size=8)
+    model.fit(ratings, ratings, epochs=50, batch_size=8)    
     
     print("saving prediction model")
-    path=get_model_path()
+    path=NULL
+    if model_type is NULL:
+        path = get_model_path()
+    else:
+        path=f'+_{model_type}+_{starting}-{ending}.keras'
     model.save(path)
     print(f"prediction model saved to {path}")
+    return path
     
 
-def predict():
+def predict(model_path=NULL,option=0,user_name=NULL,user_path=NULL,Ask_PreMade_user=True):
     global ratings
     print("starting Predictions")
-    print("Please provide the prediction model")
-    model_path = get_model_path()
+    if model_path is NULL:
+        print("Please provide the prediction model")
+        model_path = get_model_path()
     model = load_model(model_path)
     total_values = 62423
     new_user = np.zeros(total_values)
     
-    user_name=NULL
-    option=input("Do you already have a user you want to select for? (1) yes (anything else) no")
+    if Ask_PreMade_user:
+        option=input("Do you already have a user you want to select for? (1) yes (anything else) no")
     if int(option) == 1:
         print("Please provide the user's info")
-        user_path=get_npy_path()
+        if user_path is NULL:
+            user_path=get_npy_path()
         new_user = np.load(user_path)
         user_name=user_path.split('+')
         user_name = user_name[1]
     else:
         non_zero_ratio=0.005
-    
-        # Calculate how many values should be non-zero
-        num_non_zero = int(non_zero_ratio * total_values)
-    
-        # Generate random indices to place non-zero values
-        indices = np.random.choice(total_values, num_non_zero, replace=False)
+        num_non_zero = int(non_zero_ratio * total_values) # Calculate how many values should be non-zero
+        indices = np.random.choice(total_values, num_non_zero, replace=False) # Generate random indices to place non-zero values
     
         # Randomly assign non-zero values between 0.5 and 5 (rounded to nearest 0.5)
         values = np.random.choice(np.arange(1, 19) * 0.5, num_non_zero) * 0.5
@@ -441,12 +478,13 @@ def predict():
         # Reshape the array
         new_user = new_user.reshape(1, -1)
         
-        user_name=input("enter the users name: ")
-        user_name = user_name.replace(" ","")
-        save(f'user+{user_name}+input.npy',new_user)
+        if user_name is NULL:
+            user_name=input("enter the users name: ")
+            user_name = user_name.replace(" ","")
+        user_path=f'user+{user_name}+input.npy'
+        save(user_path,new_user)
         
     print(f"Generating Predictions for {user_name}")
-    
     prediction = model.predict(new_user)
     prediction = np.array(prediction)
     prediction = np.ravel(prediction)
@@ -457,7 +495,7 @@ def predict():
     #       we shouldn't be getting negative values in the predictions
     
     print("Please Provide Movie IDs")
-    with open(get_csv_path(), newline='') as csvfile:
+    with open('movies_id_only.csv', newline='') as csvfile:
         csvFile = list(csv.reader(csvfile))
         # Extract movie IDs (assuming movie IDs are in the first column)
         movie_ids = [int(row[0]) for row in csvFile[1:]]
@@ -475,15 +513,11 @@ def predict():
     prediction = np.transpose(prediction)
     
     # Combine random values with predictions into a single array
-    for index, i in enumerate(new_user):
-        if i == 0:
-            new_user[index]=NULL
     data = np.column_stack((movie_ids,new_user, prediction))
 
     # Specify the file path where you want to save the CSV file
-    prediction_model_name=model_path.split('.')
-    prediction_model_name=prediction_model_name[0].split('/')
-    prediction_model_name = prediction_model_name[len(prediction_model_name)-1]
+    prediction_model_name=model_path.split('+_')
+    prediction_model_name=prediction_model_name[1]
     prediction_full_path = f"{user_name}_Predictions_Full_{prediction_model_name}.csv"
     prediction_path = f"{user_name}_Predictions_{prediction_model_name}.csv"
     # Save the combined data to a CSV file with headers
@@ -497,14 +531,7 @@ def predict():
     
 
     printOutput(prediction)
-    
-    
-
-    # random_values=random_values.transpose()
-    # prediction=prediction.transpose()
-    # output=np.array([random_values])
-    # print(random_values)
-    # print(prediction)
+    return prediction, user_path
     
     
 def scale_values(array):
@@ -558,10 +585,10 @@ def get_model_path():
 
 
 def printOutput(data): # Select the top n recommendations, and format & print them
-    n = 50
+    n = 15
     selections = np.zeros((n, 2)) # This array holds the actual selected rating values, as well as their indexes within the output array
     print("please provide movies+links.csv")
-    path=get_csv_path()
+    path='movies+links.csv'
     with open(path, mode='r', encoding="utf-8") as file: # Match each rating to its respective movie
         reader = csv.reader(file)
         movies = list(reader)
@@ -586,6 +613,5 @@ def printOutput(data): # Select the top n recommendations, and format & print th
             #line = np.where(array[0] == int(selections[i][1]))
             print(f'Movie {count}: {line[1]}, Rating: {selections[i][0]}')
             count += 1
-
-        
+  
 main()
